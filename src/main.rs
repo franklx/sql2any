@@ -1,23 +1,31 @@
 use anyhow::Result;
-use rust_xlsxwriter::{Format, XlsxError};
+use enum_map::{enum_map, Enum, EnumMap};
 use rust_xlsxwriter::{ColNum, RowNum, Workbook, Worksheet};
-use sqlx::AnyConnection;
-use sqlx::AnyPool;
+use rust_xlsxwriter::Format;
+use sqlx::types::chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use sqlx::Column;
 use sqlx::Connection;
-use sqlx::Database;
 use sqlx::PgConnection;
 use sqlx::TypeInfo;
-use sqlx::types::chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use sqlx::{postgres::PgRow, Row};
 use std::env::var;
-use std::ops::Deref;
-use std::path::PathBuf;
-use std::str::FromStr;
-use enum_map::{Enum, enum_map, EnumMap};
+use std::path::Path;
+use clap::Parser;
 
 type FmtMap = EnumMap<XF, Format>;
 type ConvFn = fn(RowNum, ColNum, &mut Worksheet, &PgRow, &FmtMap) -> Result<()>;
+
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long)]
+    url: Option<String>,
+
+    #[arg(short, long)]
+    output: String,
+
+    #[arg()]
+    query: String,
+}
 
 #[derive(Enum)]
 enum XF {
@@ -32,13 +40,12 @@ enum XF {
 #[macro_export]
 macro_rules! xlsx_write {
     () => {
-        |_r, _c, _ws, _rw, _fm| {
-            Ok(())
-        }
+        |_r, _c, _ws, _rw, _fm| Ok(())
     };
     ($ty:ty) => {
         |r, c, ws, rw, _fm| {
-            ws.write(r, c, rw.get::<$ty, _>(c as usize))?; Ok(())
+            ws.write(r, c, rw.get::<$ty, _>(c as usize))?;
+            Ok(())
         }
     };
     (Option<$ty:ty>, $fmt:path) => {
@@ -51,13 +58,13 @@ macro_rules! xlsx_write {
     };
     ($ty:ty, $fmt:path) => {
         |r, c, ws, rw, fm| {
-            ws.write_with_format(r, c, rw.get::<$ty, _>(c as usize), &fm[$fmt])?; Ok(())
+            ws.write_with_format(r, c, rw.get::<$ty, _>(c as usize), &fm[$fmt])?;
+            Ok(())
         }
     };
 }
 
-
-async fn test_clean(db: &mut PgConnection) -> Result<()> {
+async fn run(db: &mut PgConnection, sql: &str, output: impl AsRef<Path>) -> Result<()> {
     let xf = enum_map! {
         XF::Bold => Format::new().set_bold(),
         XF::Int => Format::new().set_num_format("#,##0"),
@@ -68,7 +75,7 @@ async fn test_clean(db: &mut PgConnection) -> Result<()> {
     };
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
-    let result = sqlx::query("SELECT * FROM sintorip.artico").fetch_all(db).await.unwrap();
+    let result = sqlx::query(sql).fetch_all(db).await.unwrap();
     if !result.is_empty() {
         let r = 0;
         let columns = result[0].columns();
@@ -92,20 +99,7 @@ async fn test_clean(db: &mut PgConnection) -> Result<()> {
                 typ => {
                     eprintln!("Unknown type {typ:?}");
                     xlsx_write!()
-                },
-                /*
-                match col.type_info().kind() {
-                    sqlx::postgres::any::AnyTypeInfoKind::Null => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Bool => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::SmallInt => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Integer => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::BigInt => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Real => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Double => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Text => todo!(),
-                    sqlx::postgres::any::AnyTypeInfoKind::Blob => todo!(),
-                };
-                */
+                }
             })
             .collect::<Vec<_>>();
         for (r, rw) in result.iter().enumerate() {
@@ -114,17 +108,14 @@ async fn test_clean(db: &mut PgConnection) -> Result<()> {
             }
         }
     }
-    wb.save("test.xlsx")?;
+    wb.save(output)?;
     Ok(())
 }
 #[tokio::main]
 async fn main() -> Result<()> {
-    let db_url = var("DATABASE_URL").expect("DATABASE_URL must be set");
-    sqlx::any::install_default_drivers();
-    //let mut db = sqlx::AnyConnection::connect(&db_url).await?;
+    let args = Args::parse();
+    let db_url = args.url.unwrap_or_else(|| var("DATABASE_URL").expect("DATABASE_URL must be set if url not provided"));
     let mut db = sqlx::PgConnection::connect(&db_url).await?;
-    test_clean(&mut db).await?;
-    //let db = sqlx::AnyPool::connect(&db_url).await?;
-    //db.ac
+    run(&mut db, &args.query, &args.output).await?;
     Ok(())
 }

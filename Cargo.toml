@@ -9,6 +9,7 @@ authors = ["Franco Lucchini <flucchini@gmail.com>"]
 [dependencies]
 anyhow = "*"
 enum-map = "*"
-sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "postgres", "macros", "chrono", "rust_decimal", "any", "mysql" ] }
+sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "postgres", "macros", "chrono", "rust_decimal" ] }
 rust_xlsxwriter = { version = "*", features = ["chrono"] }
 tokio = { version = "1", features = ["full"] }
+clap = { version = "4", features = ["derive"] }
