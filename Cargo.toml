@@ -1,0 +1,14 @@
+[package]
+name = "sql2xls"
+version = "0.1.0"
+edition = "2021"
+authors = ["Franco Lucchini <flucchini@gmail.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "*"
+enum-map = "*"
+sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "postgres", "macros", "chrono", "rust_decimal", "any", "mysql" ] }
+rust_xlsxwriter = { version = "*", features = ["chrono"] }
+tokio = { version = "1", features = ["full"] }
