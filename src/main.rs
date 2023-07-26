@@ -5,15 +5,17 @@ use rust_xlsxwriter::Format;
 use sqlx::types::chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use sqlx::Column;
 use sqlx::Connection;
-use sqlx::PgConnection;
+//use sqlx::MySqlConnection as DbConnection;
+use sqlx::PgConnection as DbConnection;
 use sqlx::TypeInfo;
-use sqlx::{postgres::PgRow, Row};
+//use sqlx::{mysql::MySqlRow as DbRow, Row};
+use sqlx::{postgres::PgRow as DbRow, Row};
 use std::env::var;
 use std::path::Path;
 use clap::Parser;
 
 type FmtMap = EnumMap<XF, Format>;
-type ConvFn = fn(RowNum, ColNum, &mut Worksheet, &PgRow, &FmtMap) -> Result<()>;
+type ConvFn = fn(RowNum, ColNum, &mut Worksheet, &DbRow, &FmtMap) -> Result<()>;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -64,7 +66,7 @@ macro_rules! xlsx_write {
     };
 }
 
-async fn run(db: &mut PgConnection, sql: &str, output: impl AsRef<Path>) -> Result<()> {
+async fn run(db: &mut DbConnection, sql: &str, output: impl AsRef<Path>) -> Result<()> {
     let xf = enum_map! {
         XF::Bold => Format::new().set_bold(),
         XF::Int => Format::new().set_num_format("#,##0"),
@@ -87,11 +89,12 @@ async fn run(db: &mut PgConnection, sql: &str, output: impl AsRef<Path>) -> Resu
             })
             .map::<ConvFn, _>(|(_c, col)| match col.type_info().name().to_lowercase().as_str() {
                 "string" | "varchar" | "text" | "char" => xlsx_write!(&str),
-                "int2" => xlsx_write!(i16, XF::Int),
-                "int4" => xlsx_write!(i32, XF::Int),
+                "tinyint" => xlsx_write!(i8, XF::Int),
+                "int2" | "smallint" => xlsx_write!(i16, XF::Int),
+                "int4" | "bigint" => xlsx_write!(i32, XF::Int),
                 //"int8" => xlsx_write!(i64, Int),
-                "float4" => xlsx_write!(f32, XF::Eur),
-                "float8" => xlsx_write!(f64, XF::Eur),
+                "float4" | "float" => xlsx_write!(f32, XF::Eur),
+                "float8" | "double" => xlsx_write!(f64, XF::Eur),
                 "bool" => xlsx_write!(bool),
                 "date" => xlsx_write!(Option<NaiveDate>, XF::Date),
                 "time" => xlsx_write!(Option<NaiveTime>, XF::Time),
@@ -115,6 +118,7 @@ async fn run(db: &mut PgConnection, sql: &str, output: impl AsRef<Path>) -> Resu
 async fn main() -> Result<()> {
     let args = Args::parse();
     let db_url = args.url.unwrap_or_else(|| var("DATABASE_URL").expect("DATABASE_URL must be set if url not provided"));
+    //let mut db = sqlx::MySqlConnection::connect(&db_url).await?;
     let mut db = sqlx::PgConnection::connect(&db_url).await?;
     run(&mut db, &args.query, &args.output).await?;
     Ok(())
