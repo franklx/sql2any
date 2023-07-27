@@ -14,3 +14,5 @@ rust_xlsxwriter = { version = "*", features = ["chrono"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
 url = "*"
+num-traits = "*"
+# serde_json = { version = "1", features = ["preserve_order"] }

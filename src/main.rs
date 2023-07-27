@@ -1,10 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
 use enum_map::{enum_map, Enum, EnumMap};
+use num_traits::ToPrimitive;
 use rust_xlsxwriter::Format;
 use rust_xlsxwriter::{ColNum, RowNum, Workbook, Worksheet};
 use sqlx::database::HasArguments;
 use sqlx::types::chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime};
+use sqlx::types::{Decimal, JsonValue};
 use sqlx::Connection;
 use sqlx::Row;
 use sqlx::{Column, ColumnIndex, Database, Decode, Executor, IntoArguments, Type, TypeInfo};
@@ -76,6 +78,10 @@ where
     for<'b> i16: Decode<'b, DB> + Type<DB>,
     for<'b> i32: Decode<'b, DB> + Type<DB>,
     for<'b> i64: Decode<'b, DB> + Type<DB>,
+    //for<'b> u8: Decode<'b, DB> + Type<DB>,
+    //for<'b> u16: Decode<'b, DB> + Type<DB>,
+    //for<'b> u32: Decode<'b, DB> + Type<DB>,
+    //for<'b> u64: Decode<'b, DB> + Type<DB>,
     for<'b> f32: Decode<'b, DB> + Type<DB>,
     for<'b> f64: Decode<'b, DB> + Type<DB>,
     for<'b> &'b str: Decode<'b, DB> + Type<DB>,
@@ -84,6 +90,8 @@ where
     for<'b> NaiveDateTime: Decode<'b, DB> + Type<DB>,
     for<'b> NaiveTime: Decode<'b, DB> + Type<DB>,
     for<'b> DateTime<Local>: Decode<'b, DB> + Type<DB>,
+    for<'b> Decimal: Decode<'b, DB> + Type<DB>,
+    for<'b> JsonValue: Decode<'b, DB> + Type<DB>,
     usize: ColumnIndex<DB::Row>,
 {
     let xf = enum_map! {
@@ -108,29 +116,59 @@ where
                 ws.write_with_format(r, *c as ColNum, col.name(), &xf[XF::Bold]).unwrap();
             })
             .map::<ConvFn<DB::Row>, _>(|(_c, col)| match col.type_info().name().to_lowercase().as_str() {
-                "string" | "varchar" | "text" | "char" => xlsx_write!(&str),
+                "string" | "varchar" | "tinytext" | "text" | "mediumtext" | "longtext" | "char" | "bpchar" => {
+                    xlsx_write!(&str)
+                }
                 "tinyint" => xlsx_write!(i8, XF::Int),
                 "int2" | "smallint" => xlsx_write!(i16, XF::Int),
-                "int4" | "bigint" => xlsx_write!(i32, XF::Int),
-                "int8" => |r, c, ws, rw, fm| {
+                "int4" | "int" | "mediumint" => xlsx_write!(i32, XF::Int),
+                "int8" | "bigint" => |r, c, ws, rw, fm| {
                     ws.write_with_format(r, c, rw.get::<i64, _>(c as usize) as f64, &fm[XF::Int])?;
                     Ok(())
                 },
+                //"tinyint unsigned" => xlsx_write!(u8, XF::Int),
+                //"smallint unsigned" => xlsx_write!(u16, XF::Int),
+                //"int unsigned" | "mediumint unsigned" => xlsx_write!(u32, XF::Int),
+                //"bigint unsigned" => |r, c, ws, rw, fm| {
+                //    ws.write_with_format(r, c, rw.get::<u64, _>(c as usize) as f64, &fm[XF::Int])?;
+                //    Ok(())
+                //},
                 "float4" | "float" => xlsx_write!(f32, XF::Eur),
                 "float8" | "double" => xlsx_write!(f64, XF::Eur),
-                "bool" => xlsx_write!(bool),
+                "decimal" | "numeric" => |r, c, ws, rw, fm| {
+                    ws.write_with_format(r, c, rw.get::<Decimal, _>(c as usize).to_f64().unwrap(), &fm[XF::Eur])?;
+                    Ok(())
+                },
+                // binary(16) => uuid
+                "json" | "jsonb" => |r, c, ws, rw, _fm| {
+                    ws.write(r, c, rw.get::<JsonValue, _>(c as usize).to_string())?;
+                    Ok(())
+                },
+                "bool" | "boolean" => xlsx_write!(bool),
                 "date" => xlsx_write!(Option<NaiveDate>, XF::Date),
                 "time" => xlsx_write!(Option<NaiveTime>, XF::Time),
                 "datetime" => xlsx_write!(Option<NaiveDateTime>, XF::Stamp),
                 "timestamp" if bk == "postgres" => xlsx_write!(Option<NaiveDateTime>, XF::Stamp),
-                "timestamp" if bk == "mysql" => |r, c, ws, rw, fm| {
+                //"timetz" // DEPRECATED
+                //"money" // DEPRECATED
+                //"bit"
+                //"varbit"
+                //"varbinary"
+                //"tinyblob"
+                //"blob"
+                //"mediumblob"
+                //"longblob"
+                //"year"
+                //"set"
+                //"enum"
+                "timestamptz" | "timestamp" if bk == "mysql" => |r, c, ws, rw, fm| {
                     if let Some(v) = rw.get::<Option<DateTime<Local>>, _>(c as usize) {
                         ws.write_with_format(r, c, &v.naive_local(), &fm[XF::Stamp])?;
                     }
                     Ok(())
                 },
                 typ => {
-                    eprintln!("Unknown type {typ:?}");
+                    eprintln!("Unsupported type {typ:?}");
                     xlsx_write!()
                 }
             })
