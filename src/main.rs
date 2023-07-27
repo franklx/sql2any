@@ -17,12 +17,15 @@ type ConvFn<'a, R> = fn(RowNum, ColNum, &mut Worksheet, &'a R, &FmtMap) -> Resul
 
 #[derive(Parser, Debug)]
 struct Args {
+    /// Database url to connect to
     #[arg(short, long)]
     url: Option<String>,
 
+    /// Output filename in xlsx format
     #[arg(short, long)]
     output: String,
 
+    /// SQL query to execute
     #[arg()]
     query: String,
 }
@@ -64,7 +67,7 @@ macro_rules! xlsx_write {
     };
 }
 
-async fn run<'a, DB, E>(db: &'a mut E, sql: &'a str, output: impl AsRef<Path>) -> Result<()>
+async fn run<'a, DB, E>(bk: &'a str, db: &'a mut E, sql: &'a str, output: impl AsRef<Path>) -> Result<()>
 where
     DB: Database,
     <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
@@ -93,10 +96,11 @@ where
     };
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
+    ws.set_freeze_panes(1, 0)?;
     let result = sqlx::query(sql).fetch_all(db).await.unwrap();
     if !result.is_empty() {
         let r = 0;
-        let columns = result[0].columns();
+        let columns: &[DB::Column] = result[0].columns();
         let convs = columns
             .iter()
             .enumerate()
@@ -108,14 +112,18 @@ where
                 "tinyint" => xlsx_write!(i8, XF::Int),
                 "int2" | "smallint" => xlsx_write!(i16, XF::Int),
                 "int4" | "bigint" => xlsx_write!(i32, XF::Int),
-                "int8" => xlsx_write!(f64, XF::Int),
+                "int8" => |r, c, ws, rw, fm| {
+                    ws.write_with_format(r, c, rw.get::<i64, _>(c as usize) as f64, &fm[XF::Int])?;
+                    Ok(())
+                },
                 "float4" | "float" => xlsx_write!(f32, XF::Eur),
                 "float8" | "double" => xlsx_write!(f64, XF::Eur),
                 "bool" => xlsx_write!(bool),
                 "date" => xlsx_write!(Option<NaiveDate>, XF::Date),
                 "time" => xlsx_write!(Option<NaiveTime>, XF::Time),
                 "datetime" => xlsx_write!(Option<NaiveDateTime>, XF::Stamp),
-                "timestamp" => |r, c, ws, rw, fm| {
+                "timestamp" if bk == "postgres" => xlsx_write!(Option<NaiveDateTime>, XF::Stamp),
+                "timestamp" if bk == "mysql" => |r, c, ws, rw, fm| {
                     if let Some(v) = rw.get::<Option<DateTime<Local>>, _>(c as usize) {
                         ws.write_with_format(r, c, &v.naive_local(), &fm[XF::Stamp])?;
                     }
@@ -132,10 +140,13 @@ where
                 conv((r + 1) as RowNum, c as ColNum, ws, rw, &xf)?;
             }
         }
+        ws.autofilter(0, 0, (result.len() as u32) - 1, (columns.len() as u16) - 1)?;
+        ws.autofit();
         wb.save(output)?;
     }
     Ok(())
 }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -144,13 +155,13 @@ async fn main() -> Result<()> {
     )
     .expect("Invalid url");
     match db_url.scheme() {
-        "postgres" => {
+        bk @ "postgres" => {
             let mut db = sqlx::PgConnection::connect(db_url.as_str()).await?;
-            run(&mut db, &args.query, &args.output).await?;
+            run(bk, &mut db, &args.query, &args.output).await?;
         }
-        "mysql" => {
+        bk @ "mysql" => {
             let mut db = sqlx::MySqlConnection::connect(db_url.as_str()).await?;
-            run(&mut db, &args.query, &args.output).await?;
+            run(bk, &mut db, &args.query, &args.output).await?;
         }
         scheme => panic!("Unknown driver {scheme}"),
     }
