@@ -10,7 +10,7 @@ use sqlx::mysql::MySqlColumn;
 use sqlx::postgres::PgColumn;
 use sqlx::types::chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use sqlx::types::{Decimal, JsonValue};
-use sqlx::Row;
+use sqlx::{Row, Postgres, MySql};
 use sqlx::Connection;
 use sqlx::{Column, ColumnIndex, Database, Decode, Executor, IntoArguments, Type, TypeInfo};
 use std::env::var;
@@ -285,11 +285,9 @@ impl Field {
     }
 }
 
-async fn to_xlsx<'a, DB, E>(db: &'a mut E, sql: &'a str, output: impl AsRef<Path>) -> Result<()>
+fn to_xlsx<'a, DB>(result: &Vec<DB::Row>, output: impl AsRef<Path>) -> Result<()>
 where
     DB: Database,
-    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
-    &'a mut E: Executor<'a, Database = DB>,
     for<'b> i8: Decode<'b, DB> + Type<DB>,
     for<'b> i16: Decode<'b, DB> + Type<DB>,
     for<'b> i32: Decode<'b, DB> + Type<DB>,
@@ -322,7 +320,6 @@ where
     let mut wb = Workbook::new();
     let ws = wb.add_worksheet();
     ws.set_freeze_panes(1, 0)?;
-    let result = sqlx::query(sql).fetch_all(db).await.unwrap();
     if !result.is_empty() {
         let r = 0;
         let columns: Vec<Field> = result[0].columns().iter().map(|c| c.into()).collect();
@@ -346,11 +343,9 @@ where
     Ok(())
 }
 
-async fn to_json<'a, DB, E>(db: &'a mut E, sql: &'a str, output: impl AsRef<Path>) -> Result<()>
+fn to_json<'a, DB>(result: &Vec<DB::Row>, output: impl AsRef<Path>) -> Result<()>
 where
     DB: Database,
-    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
-    &'a mut E: Executor<'a, Database = DB>,
     for<'b> i8: Decode<'b, DB> + Type<DB>,
     for<'b> i16: Decode<'b, DB> + Type<DB>,
     for<'b> i32: Decode<'b, DB> + Type<DB>,
@@ -374,7 +369,6 @@ where
 {
     let mut jf = File::create(output)?;
     writeln!(jf, "[")?;
-    let result = sqlx::query(sql).fetch_all(db).await.unwrap();
     if !result.is_empty() {
         let columns: Vec<Field> = result[0].columns().iter().map(|c| c.into()).collect();
         let convs = columns
@@ -393,6 +387,17 @@ where
     Ok(())
 }
 
+async fn db_fetch<'a, DB>(db_url: Url, sql: &'a str) -> Result<Vec<DB::Row>>
+where
+    DB: Database,
+    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
+    for<'b> &'b mut DB::Connection: Executor<'b, Database = DB>,
+{
+    let mut db = DB::Connection::connect(db_url.as_str()).await?;
+    let result = sqlx::query(sql).fetch_all(&mut db).await?;
+    Ok(result)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -402,14 +407,14 @@ async fn main() -> Result<()> {
     .expect("Invalid url");
     match db_url.scheme() {
         "postgres" => {
-            let mut db = sqlx::PgConnection::connect(db_url.as_str()).await?;
-            to_xlsx(&mut db, &args.query, &args.output).await?;
-            to_json(&mut db, &args.query, &args.output).await?;
+            let result = db_fetch::<Postgres>(db_url, &args.query).await?;
+            to_json::<Postgres>(&result, &args.output)?;
+            to_xlsx::<Postgres>(&result, &args.output)?;
         }
         "mysql" => {
-            let mut db = sqlx::MySqlConnection::connect(db_url.as_str()).await?;
-            to_xlsx(&mut db, &args.query, &args.output).await?;
-            to_json(&mut db, &args.query, &args.output).await?;
+            let result = db_fetch::<MySql>(db_url, &args.query).await?;
+            to_json::<MySql>(&result, &args.output)?;
+            to_xlsx::<MySql>(&result, &args.output)?;
         }
         scheme => panic!("Unknown driver {scheme}"),
     }
