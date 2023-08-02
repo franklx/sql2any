@@ -1,11 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
-use conv::Converter;
 use conv::json::JSON;
 use conv::xlsx::XLSX;
+use conv::Converter;
 use sqlx::database::HasArguments;
 use sqlx::{Connection, Database, Executor, IntoArguments, MySql, Postgres};
 use std::env::var;
+use std::path::{Path, PathBuf};
 use url::Url;
 
 pub mod conv;
@@ -16,9 +17,9 @@ struct Args {
     #[arg(short, long)]
     url: Option<String>,
 
-    /// Output filename in xlsx format
+    /// Output filename
     #[arg(short, long)]
-    output: String,
+    output: PathBuf,
 
     /// SQL query to execute
     #[arg()]
@@ -36,26 +37,88 @@ where
     Ok(result)
 }
 
+// Thank you to DanielKeep
+// https://users.rust-lang.org/t/macro-generating-complete-match/97827
+macro_rules! matcher {
+    ($params:ident : $($str1:literal => $typ1:ty),* ; $($str2:literal => $typ2:ident),* ;) => {
+        matcher! {
+            @step
+            $params;
+            { };
+            $($str1 => $typ1),*;
+            $($str2 => $typ2),*;
+        }
+    };
+
+    (@step
+        $params:ident;
+        { $($arms:tt)* };
+        $str1_head:literal => $typ1_head:ty
+        $(, $str1_tail:literal => $typ1_tail:ty)*;
+        $($str2:literal => $typ2:ident),*;
+    ) => {
+        matcher! {
+            @step
+            $params;
+            {
+                $($arms)*
+                $(
+                    ($str1_head, $str2) => {
+                        $typ2::<$typ1_head>::write(&db_fetch::<$typ1_head>($params.db_url, $params.query).await?, $params.output)?;
+                    }
+                )*
+            };
+            $($str1_tail => $typ1_tail),*;
+            $($str2 => $typ2),*;
+        }
+    };
+
+    (@step
+        $params:ident;
+        { $($arms:tt)* };
+        ;
+        $($tail:tt)*
+    ) => {
+        match ($params.db_url.scheme(), $params.format) {
+            $($arms)*
+            _ => (),
+        }
+    };
+}
+
+struct Params<'a> {
+    db_url: &'a Url,
+    query: &'a str,
+    output: &'a Path,
+    format: &'a str,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let db_url = Url::parse(
-        args.url.unwrap_or_else(|| var("DATABASE_URL").expect("DATABASE_URL must be set if url not provided")).as_ref(),
-    )
-    .expect("Invalid url");
 
-    match db_url.scheme() {
-        "postgres" => {
-            let result = db_fetch::<Postgres>(&db_url, &args.query).await?;
-            JSON::<Postgres>::write(&result, &args.output)?;
-            XLSX::<Postgres>::write(&result, &args.output)?;
-        }
-        "mysql" => {
-            let result = db_fetch::<MySql>(&db_url, &args.query).await?;
-            JSON::<MySql>::write(&result, &args.output)?;
-            XLSX::<MySql>::write(&result, &args.output)?;
-        }
-        scheme => panic!("Unknown driver {scheme}"),
-    }
+    let params = Params {
+        db_url: &Url::parse(
+            args.url
+                .unwrap_or_else(|| var("DATABASE_URL").expect("DATABASE_URL must be set if url not provided"))
+                .as_ref(),
+        )
+        .expect("Invalid url"),
+        query: &args.query,
+        output: &args.output,
+        format: args.output.extension().unwrap().to_str().unwrap(),
+    };
+
+    matcher!(
+        params
+        :
+        "mysql" => MySql,
+        "postgres" => Postgres
+        ;
+        "json" => JSON,
+        "xlsx" => XLSX
+        ;
+    );
+
     Ok(())
 }
