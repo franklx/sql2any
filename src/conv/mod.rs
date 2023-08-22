@@ -1,5 +1,6 @@
 pub mod json;
 pub mod xlsx;
+pub mod gfm;
 
 use anyhow::Result;
 use sqlx::types::chrono::{DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime};

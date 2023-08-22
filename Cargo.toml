@@ -1,18 +1,20 @@
 [package]
-name = "sql2xls"
-version = "0.1.0"
+name = "sql2any"
+version = "0.1.2"
 edition = "2021"
 authors = ["Franco Lucchini <flucchini@gmail.com>"]
+description = "Export data from SQL databases in various formats"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "*"
-enum-map = "*"
+anyhow = "1"
+enum-map = "2"
 sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "macros", "chrono", "rust_decimal", "postgres", "mysql" ] }
-rust_xlsxwriter = { version = "*", features = ["chrono"] }
+rust_xlsxwriter = { version = "0", features = ["chrono"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }
-url = "*"
-num-traits = "*"
+url = "2"
+num-traits = "0.2"
 serde_json = { version = "1", features = ["preserve_order"] }

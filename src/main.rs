@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use conv::json::JSON;
 use conv::xlsx::XLSX;
+use conv::gfm::GFM;
 use conv::Converter;
 use sqlx::database::HasArguments;
 use sqlx::{Connection, Database, Executor, IntoArguments, MySql, Postgres};
@@ -37,7 +38,7 @@ where
     Ok(result)
 }
 
-// Thank you to DanielKeep
+// Thanks to DanielKeep
 // https://users.rust-lang.org/t/macro-generating-complete-match/97827
 macro_rules! matcher {
     ($params:ident : $($str1:literal => $typ1:ty),* ; $($str2:literal => $typ2:ident),* ;) => {
@@ -116,7 +117,8 @@ async fn main() -> Result<()> {
         "postgres" => Postgres
         ;
         "json" => JSON,
-        "xlsx" => XLSX
+        "xlsx" => XLSX,
+        "gfm" => GFM
         ;
     );
 
