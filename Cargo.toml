@@ -11,7 +11,7 @@ license = "MIT"
 [dependencies]
 anyhow = "1"
 enum-map = "2"
-sqlx = { version = "0.7", features = [ "runtime-tokio-rustls", "macros", "chrono", "rust_decimal", "postgres", "mysql" ] }
+sqlx = { version = "0.8", features = [ "runtime-tokio-rustls", "macros", "chrono", "rust_decimal", "postgres", "mysql" ] }
 rust_xlsxwriter = { version = "0", features = ["chrono"] }
 tokio = { version = "1", features = ["full"] }
 clap = { version = "4", features = ["derive"] }

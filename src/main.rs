@@ -4,7 +4,6 @@ use conv::json::JSON;
 use conv::xlsx::XLSX;
 use conv::gfm::GFM;
 use conv::Converter;
-use sqlx::database::HasArguments;
 use sqlx::{Connection, Database, Executor, IntoArguments, MySql, Postgres};
 use std::env::var;
 use std::path::{Path, PathBuf};
@@ -30,7 +29,7 @@ struct Args {
 async fn db_fetch<'a, DB>(db_url: &'a Url, sql: &'a str) -> Result<Vec<DB::Row>>
 where
     DB: Database,
-    <DB as HasArguments<'a>>::Arguments: IntoArguments<'a, DB>,
+    DB::Arguments<'a>: IntoArguments<'a, DB>,
     for<'b> &'b mut DB::Connection: Executor<'b, Database = DB>,
 {
     let mut db = DB::Connection::connect(db_url.as_str()).await?;
